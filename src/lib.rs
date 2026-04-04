@@ -1160,7 +1160,7 @@ impl Rtc {
             dtls_buf: vec![0; 2000],
             next_dtls_timeout: None,
             session,
-            sctp: RtcSctp::new(),
+            sctp: RtcSctp::new(config.local_max_message_size),
             chan: ChannelHandler::default(),
             stats: config.stats_interval.map(Stats::new),
             remote_fingerprint: None,

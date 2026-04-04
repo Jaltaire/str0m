@@ -46,6 +46,7 @@ pub struct RtcConfig {
     pub(crate) enable_raw_packets: bool,
     pub(crate) dtls_version: DtlsVersion,
     pub(crate) vp9_packetizer_mode: Vp9PacketizerMode,
+    pub(crate) local_max_message_size: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -584,6 +585,18 @@ impl RtcConfig {
         self.vp9_packetizer_mode
     }
 
+    /// Sets the maximum SCTP message size for data channel messages (in bytes).
+    ///
+    /// This controls both the local receive limit (advertised in SDP) and the
+    /// upper bound for outgoing messages. The actual send limit is the minimum
+    /// of this value and what the remote peer advertises.
+    ///
+    /// Defaults to 256 KB if not set.
+    pub fn set_local_max_message_size(mut self, size: u32) -> Self {
+        self.local_max_message_size = Some(size);
+        self
+    }
+
     /// Create a [`Rtc`] from the configuration.
     pub fn build(self, start: Instant) -> Rtc {
         Rtc::new_from_config(self, start).expect("Failed to create Rtc from config")
@@ -619,6 +632,7 @@ impl Default for RtcConfig {
             enable_raw_packets: false,
             dtls_version: DtlsVersion::Dtls12,
             vp9_packetizer_mode: Vp9PacketizerMode::default(),
+            local_max_message_size: None,
         }
     }
 }

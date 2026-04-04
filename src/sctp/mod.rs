@@ -41,6 +41,7 @@ pub(crate) struct RtcSctp {
     last_now: Instant,
     client: bool,
     remote_max_message_size: u32,
+    local_max_message_size: u32,
 }
 
 /// This is okay because there is no way for a user of Rtc to interact with the Sctp subsystem
@@ -234,7 +235,9 @@ impl StreamEntry {
 }
 
 impl RtcSctp {
-    pub fn new() -> Self {
+    pub fn new(local_max_message_size: Option<u32>) -> Self {
+        let local_max = local_max_message_size.unwrap_or(LOCAL_MAX_MESSAGE_SIZE);
+
         let mut config = EndpointConfig::default();
         // Default here is 1200, I've seen warnings that are 77 over.
         // DTLS above MTU 1200: 1277
@@ -242,9 +245,8 @@ impl RtcSctp {
         config.max_payload_size(1120);
         let mut server_config = ServerConfig::default();
 
-        server_config.transport = Arc::new(
-            TransportConfig::default().with_max_receive_message_size(LOCAL_MAX_MESSAGE_SIZE),
-        );
+        server_config.transport =
+            Arc::new(TransportConfig::default().with_max_receive_message_size(local_max));
 
         let endpoint = Endpoint::new(Arc::new(config), Some(Arc::new(server_config)));
         let fake_addr = "1.1.1.1:5000".parse().unwrap();
@@ -260,6 +262,7 @@ impl RtcSctp {
             last_now: Instant::now(), // placeholder until init()
             client: false,
             remote_max_message_size: DEFAULT_REMOTE_MAX_MESSAGE_SIZE,
+            local_max_message_size: local_max,
         }
     }
 
@@ -284,7 +287,7 @@ impl RtcSctp {
             let transport = TransportConfig::default()
                 .with_max_init_retransmits(None)
                 .with_max_data_retransmits(None)
-                .with_max_receive_message_size(LOCAL_MAX_MESSAGE_SIZE)
+                .with_max_receive_message_size(self.local_max_message_size)
                 .with_max_send_message_size(self.remote_max_message_size);
 
             let config = ClientConfig {
@@ -999,8 +1002,8 @@ mod tests {
     /// Helper to connect a client and server RtcSctp pair to Established state.
     fn connect_client_server() -> (RtcSctp, RtcSctp) {
         let now = Instant::now();
-        let mut client = RtcSctp::new();
-        let mut server = RtcSctp::new();
+        let mut client = RtcSctp::new(None);
+        let mut server = RtcSctp::new(None);
 
         client.init(true, now, None);
         server.init(false, now, None);
