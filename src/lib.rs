@@ -920,6 +920,7 @@ pub struct Rtc {
     peer_bytes_rx: u64,
     peer_bytes_tx: u64,
     change_counter: usize,
+    allocated_mids: Vec<Mid>,
     last_timeout_reason: Reason,
     crypto_provider: Arc<crate::crypto::CryptoProvider>,
     fingerprint_verification: bool,
@@ -1289,6 +1290,7 @@ impl Rtc {
             peer_bytes_rx: 0,
             peer_bytes_tx: 0,
             change_counter: 0,
+            allocated_mids: vec![],
             last_timeout_reason: Reason::NotHappening,
             crypto_provider,
             fingerprint_verification: config.fingerprint_verification,
@@ -1525,11 +1527,15 @@ impl Rtc {
         Ok(())
     }
 
-    /// Creates a new Mid that is not in the session already.
-    pub(crate) fn new_mid(&self) -> Mid {
+    /// Creates a new Mid that is not in the session already, and that has not been
+    /// handed out before. The latter covers mids of changes that are not yet negotiated,
+    /// whether they are in the same `SdpApi` or in an `SdpPendingOffer` that might be
+    /// merged later.
+    pub(crate) fn new_mid(&mut self) -> Mid {
         loop {
             let mid = Mid::new();
-            if !self.session.has_mid(mid) {
+            if !self.session.has_mid(mid) && !self.allocated_mids.contains(&mid) {
+                self.allocated_mids.push(mid);
                 break mid;
             }
         }
