@@ -5,9 +5,10 @@ use common::TestRtc;
 use common::init_crypto_default;
 use common::init_log;
 use common::negotiate;
-use str0m::Rtc;
 use str0m::change::{SdpAnswer, SdpOffer, SdpPendingOffer};
+use str0m::error::SdpError;
 use str0m::media::{Direction, MediaKind, Mid};
+use str0m::{Rtc, RtcError};
 use tracing::info_span;
 
 const SEED: u64 = 1;
@@ -225,4 +226,83 @@ pub fn media_added_after_media_is_negotiated_avoids_its_mid() {
     let (offer, pending) = change.apply().unwrap();
     assert_unique(&offered_mids(&offer));
     complete(&mut l, &mut r, offer, pending);
+}
+
+fn offer_with_shared_mid() -> SdpOffer {
+    let mut l = rtc("L");
+    let mut change = l.rtc.sdp_api();
+    change.add_media(MediaKind::Audio, Direction::SendRecv, None, None, None);
+    change.add_channel("data".into());
+    let (offer, _pending) = change.apply().unwrap();
+
+    let mids = offered_mids(&offer);
+    assert_eq!(mids.len(), 2);
+    let sdp = offer
+        .to_sdp_string()
+        .replace(&format!("a=mid:{}", mids[1]), &format!("a=mid:{}", mids[0]))
+        .replace(
+            &format!("a=group:BUNDLE {} {}", mids[0], mids[1]),
+            &format!("a=group:BUNDLE {} {}", mids[0], mids[0]),
+        );
+
+    let offer = SdpOffer::from_sdp_string(&sdp).expect("the rewritten offer parses");
+    assert_eq!(offered_mids(&offer), [mids[0].clone(), mids[0].clone()]);
+    offer
+}
+
+#[test]
+pub fn offer_with_duplicate_mids_is_rejected() {
+    init_log();
+    init_crypto_default();
+
+    let offer = offer_with_shared_mid();
+    let mid = offered_mids(&offer)[0].clone();
+
+    let mut r = rtc("R");
+    let result = r.rtc.sdp_api().accept_offer(offer);
+
+    let Err(RtcError::Sdp(SdpError::Inconsistent(message))) = result else {
+        panic!("offer with a duplicate mid must be rejected: {result:?}");
+    };
+    assert!(
+        message.contains(&mid),
+        "the error names the duplicate mid {mid}: {message}"
+    );
+    assert!(r.rtc.media(mid.as_str().into()).is_none());
+}
+
+#[test]
+pub fn answer_with_duplicate_mids_is_rejected() {
+    init_log();
+    init_crypto_default();
+
+    let mut l = rtc("L");
+    let mut r = rtc("R");
+
+    let mut change = l.rtc.sdp_api();
+    let audio = change.add_media(MediaKind::Audio, Direction::SendRecv, None, None, None);
+    change.add_channel("data".into());
+    let (offer, pending) = change.apply().unwrap();
+    let mids = offered_mids(&offer);
+
+    let sdp = answer(&mut r, offer)
+        .to_sdp_string()
+        .replace(&format!("a=mid:{}", mids[1]), &format!("a=mid:{}", mids[0]))
+        .replace(
+            &format!("a=group:BUNDLE {} {}", mids[0], mids[1]),
+            &format!("a=group:BUNDLE {} {}", mids[0], mids[0]),
+        );
+    let answer = SdpAnswer::from_sdp_string(&sdp).expect("the rewritten answer parses");
+
+    let result = l.rtc.sdp_api().accept_answer(pending, answer);
+
+    let Err(RtcError::Sdp(SdpError::Inconsistent(message))) = result else {
+        panic!("answer with a duplicate mid must be rejected: {result:?}");
+    };
+    assert!(
+        message.contains(&mids[0]),
+        "the error names the duplicate mid {}: {message}",
+        mids[0]
+    );
+    assert!(l.rtc.media(audio).is_none());
 }

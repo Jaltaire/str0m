@@ -101,6 +101,18 @@ impl Sdp {
         //    for PT 96 in one m-line it must be in all m-lines.
         // 2. Compare with previous m-lines that remote isn't narrowing/expanding PT and/or extmaps.
 
+        let mut seen_mids = Vec::with_capacity(self.media_lines.len());
+        for media in &self.media_lines {
+            for attr in &media.attrs {
+                if let MediaAttribute::Mid(mid) = attr {
+                    if seen_mids.contains(mid) {
+                        return Some(format!("Mid {mid} is used by more than one m-line"));
+                    }
+                    seen_mids.push(*mid);
+                }
+            }
+        }
+
         let group = self
             .session
             .attrs
@@ -1677,6 +1689,43 @@ mod test {
         for (pt, expected) in [(96, false), (98, true)] {
             let p = params.iter().find(|p| p.pt == pt.into()).unwrap();
             assert_eq!(p.fb_transport_cc(), expected);
+        }
+    }
+
+    fn sdp_with_mids(group: &str, mids: &[&str]) -> Sdp {
+        let mut sdp = format!(
+            "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE {group}\r\n"
+        );
+        for mid in mids {
+            sdp.push_str("m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n");
+            sdp.push_str(&format!("a=mid:{mid}\r\n"));
+            sdp.push_str("a=sendrecv\r\na=rtpmap:111 opus/48000/2\r\n");
+        }
+        Sdp::parse(&sdp).unwrap()
+    }
+
+    #[test]
+    fn distinct_mids_are_consistent() {
+        assert!(
+            sdp_with_mids("0 1", &["0", "1"])
+                .assert_consistency()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn duplicate_mids_are_inconsistent() {
+        let cases: [(&str, &[&str]); 3] = [
+            ("0 0", &["0", "0"]),
+            ("0", &["0", "0"]),
+            ("1 0 0", &["1", "0", "0"]),
+        ];
+        for (group, mids) in cases {
+            let err = sdp_with_mids(group, mids).assert_consistency().unwrap_err();
+            let SdpError::Inconsistent(message) = err else {
+                panic!("expected an inconsistent SDP error, got {err:?}");
+            };
+            assert_eq!(message, "Mid 0 is used by more than one m-line");
         }
     }
 
