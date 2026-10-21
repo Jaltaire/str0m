@@ -1,5 +1,6 @@
 # Unreleased
 
+  * Reject remote SDP that gives two m-lines the same mid #1097
   * Never give two m-lines in one offer the same mid #1092
 
 # 0.24.1
